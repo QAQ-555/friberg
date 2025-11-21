@@ -3,3 +3,89 @@
 // =================================================================================
 
 package friberg
+
+import (
+	"fmt"
+
+	"go.mongodb.org/mongo-driver/bson"
+)
+
+type subjectinfo struct {
+	ID          string          `json:"id" bson:"_id"`
+	Name        string          `json:"name" bson:"name"`
+	ReleaseDate string          `json:"release_date" bson:"released"`
+	Platforms   map[string]bool `json:"platform" bson:"platform_names"`
+	Tags        map[string]bool `json:"tag" bson:"tag_names"`
+}
+
+var ProjectStage = bson.D{
+	{Key: "$project", Value: bson.M{
+		"_id":      1,
+		"name":     1,
+		"released": 1,
+		"platform_names": bson.M{
+			"$arrayToObject": bson.M{
+				"$map": bson.M{
+					"input": "$platforms",
+					"as":    "p",
+					"in": bson.M{
+						"k": "$$p.platform.name", // key 为平台名
+						"v": true,                // value 可以是 true 或者 1
+					},
+				},
+			},
+		},
+		"tag_names": bson.M{
+			"$arrayToObject": bson.M{
+				"$map": bson.M{
+					"input": "$tags",
+					"as":    "t",
+					"in": bson.M{
+						"k": "$$t.name", // key 为标签名
+						"v": true,
+					},
+				},
+			},
+		},
+	}},
+}
+
+func parseSubjectInfoFromRedis(data interface{}) (*subjectinfo, error) {
+	// 1. 判断是否是 map[string]interface{}
+	m, ok := data.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("expected map[string]interface{}, got %T", data)
+	}
+
+	sub := &subjectinfo{
+		Platforms: make(map[string]bool),
+		Tags:      make(map[string]bool),
+	}
+
+	// 2. 解析简单字段
+	if id, ok := m["id"].(string); ok {
+		sub.ID = id
+	}
+	if name, ok := m["name"].(string); ok {
+		sub.Name = name
+	}
+	if rd, ok := m["release_date"].(string); ok {
+		sub.ReleaseDate = rd
+	}
+
+	// 3. 解析 Platforms map[string]bool
+	if platforms, ok := m["platform"].(map[string]interface{}); ok {
+		for k := range platforms {
+			sub.Platforms[k] = true
+		}
+	}
+
+	// 4. 解析 Tags map[string]bool
+	if tags, ok := m["tag"].(map[string]interface{}); ok {
+		for k := range tags {
+			sub.Tags[k] = true
+		}
+	}
+
+	return sub, nil
+}

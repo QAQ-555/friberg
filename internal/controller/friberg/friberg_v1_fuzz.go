@@ -2,10 +2,7 @@ package friberg
 
 import (
 	"context"
-	"fmt"
-	"log"
 
-	"github.com/gogf/gf/v2/frame/g"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 
@@ -13,18 +10,19 @@ import (
 	imongo "friberg/internal/library/mongo"
 )
 
-func (c *ControllerV1) FribergHello(ctx context.Context, req *v1.FribergHelloReq) (res *v1.FribergHelloRes, err error) {
+func (c *ControllerV1) Fuzz(ctx context.Context, req *v1.FuzzReq) (res *v1.FuzzRes, err error) {
+	res = &v1.FuzzRes{}
 	matchStage := bson.D{
 		{Key: "$match", Value: bson.D{
 			{Key: "name", Value: bson.D{
-				{Key: "$regex", Value: "^portal"},
+				{Key: "$regex", Value: "^" + req.Name},
 				{Key: "$options", Value: "i"},
 			}},
 		}},
 	}
 
 	limitStage := bson.D{
-		{Key: "$limit", Value: 1},
+		{Key: "$limit", Value: 6},
 	}
 
 	projectStage := bson.D{
@@ -42,19 +40,10 @@ func (c *ControllerV1) FribergHello(ctx context.Context, req *v1.FribergHelloReq
 	}
 	cursor, err := imongo.TableSubject.Collection(ctx).Aggregate(ctx, pipeline)
 	if err != nil {
-		log.Fatalf("failed to aggregate: %v", err)
+		return nil, err
 	}
-	var results []bson.D
-	if err = cursor.All(ctx, &results); err != nil {
-		log.Fatalf("failed to decode results: %v", err)
+	if err = cursor.All(ctx, &res.GameInfo); err != nil {
+		return nil, err
 	}
-
-	// Print the aggregation results.
-	for _, result := range results {
-		g.DumpWithType(result)
-		res, _ := bson.MarshalExtJSON(result, false, false)
-		fmt.Println(string(res))
-		g.DumpWithType(res)
-	}
-	return nil, nil
+	return res, nil
 }

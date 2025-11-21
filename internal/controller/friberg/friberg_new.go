@@ -13,3 +13,9 @@ type ControllerV1 struct{}
 func NewV1() friberg.IFribergV1 {
 	return &ControllerV1{}
 }
+
+type ControllerGame struct{}
+
+func NewGame() friberg.IFribergGame {
+	return &ControllerGame{}
+}
