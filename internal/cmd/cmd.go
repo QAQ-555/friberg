@@ -11,7 +11,9 @@ import (
 
 	"friberg/internal/controller/friberg"
 	"friberg/internal/controller/hello"
+	"friberg/internal/controller/room"
 	imongo "friberg/internal/library/mongo"
+	"friberg/internal/logic/middleware"
 )
 
 var (
@@ -26,10 +28,14 @@ var (
 			s.SetSessionStorage(gsession.NewStorageRedis(g.Redis()))
 			s.Group("/", func(group *ghttp.RouterGroup) {
 				group.Middleware(ghttp.MiddlewareHandlerResponse)
+				group.Middleware(middleware.MiddlewareCORS)
+				group.Middleware(middleware.LoggerMiddleware)
 				group.Bind(
 					hello.NewV1(),
 					friberg.NewV1(),
 					friberg.NewGame(),
+					room.NewSocket(),
+					room.NewRoom(),
 				)
 				group.ALL("/get", func(r *ghttp.Request) {
 					sessionData, err := r.Session.Data()
@@ -37,7 +43,6 @@ var (
 						r.Response.Write(err.Error())
 						return
 					}
-					g.DumpWithType(sessionData)
 					r.Response.Write(sessionData)
 				})
 			})

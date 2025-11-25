@@ -2,16 +2,14 @@ package friberg
 
 import (
 	"context"
-	"log"
-
 	v1 "friberg/api/friberg/v1"
 	imongo "friberg/internal/library/mongo"
 	"friberg/internal/model/iostruct"
 
-	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/util/gconv"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -19,39 +17,57 @@ import (
 
 func (c *ControllerV1) Guess(ctx context.Context, req *v1.GuessReq) (res *v1.GuessRes, err error) {
 	g.Log().Debug(ctx, "guess req:", req)
+	res = &v1.GuessRes{}
+
 	r := g.RequestFromCtx(ctx)
+
+	// =============================
+	// 获取玩家 session 数据
+	// =============================
 	sessionData, err := r.Session.Data()
 	if err != nil {
 		return nil, err
 	}
-	answer, err := parseSubjectInfoFromRedis(sessionData["subject"])
+
+	answer := subjectinfo{}
+	err = gconv.Struct(sessionData["subject"], &answer)
 	if err != nil {
 		return nil, err
 	}
+	g.Dump("session subject:", answer)
+
+	// =============================
+	// 更新 Frequency 并处理 Session 生命周期
+	// =============================
+	answer.Frequency = answer.Frequency - 1
+	res.Frequency = answer.Frequency
+
+	if answer.Frequency <= 0 {
+		r.Session.Close() // 最后一次机会或猜对时释放
+	} else {
+		r.Session.Set("subject", answer)
+	}
+
+	// =============================
+	// Mongo 查询真实 subject
+	// =============================
 	objectId, err := primitive.ObjectIDFromHex(req.Id)
 	if err != nil {
 		return nil, gerror.New("invalid id format")
 	}
 
-	matchStage := bson.D{
-		{Key: "$match", Value: bson.D{
-			{Key: "_id", Value: objectId},
-		}},
-	}
-	limitStage := bson.D{
-		{Key: "$limit", Value: 1},
+	pipeline := mongo.Pipeline{
+		bson.D{{Key: "$match", Value: bson.D{{Key: "_id", Value: objectId}}}},
+		bson.D{{Key: "$limit", Value: 1}},
+		ProjectStage,
 	}
 
-	projectStage := ProjectStage
-	pipeline := mongo.Pipeline{
-		matchStage,
-		limitStage,
-		projectStage,
-	}
-	cursor, err := imongo.TableSubject.Collection(ctx).Aggregate(ctx, pipeline)
+	cursor, err := imongo.TableSubject().Coll().Aggregate(ctx, pipeline)
 	if err != nil {
-		log.Fatalf("failed to aggregate: %v", err)
+		return nil, err
 	}
+	defer cursor.Close(ctx)
+
 	var guess subjectinfo
 	if cursor.Next(ctx) {
 		if err := cursor.Decode(&guess); err != nil {
@@ -60,61 +76,66 @@ func (c *ControllerV1) Guess(ctx context.Context, req *v1.GuessReq) (res *v1.Gue
 	} else {
 		return nil, gerror.New("no document found")
 	}
-	res = &v1.GuessRes{}
+
+	// =============================
+	// 判断猜测是否成功
+	// =============================
 	if guess.ID == answer.ID {
 		res.Success = true
+		r.Session.Close()
 		return res, nil
-	} else {
-		res.Success = false
-		res.Result.Name.Value = guess.Name
-		res.Result.ID.Value = guess.ID
 	}
+	res.Success = false
 
-	res.Result.ReleaseDate.Value = guess.ReleaseDate
+	// =============================
+	// 填充结果 Response
+	// =============================
+	res.Result.ID.Value = guess.ID
+	res.Result.Name.Value = guess.Name
+
+	// ReleaseDate 差值计算
 	guessTime := gtime.NewFromStr(guess.ReleaseDate)
 	answerTime := gtime.NewFromStr(answer.ReleaseDate)
-
-	// 计算天数差
-	guessTimeDiff := guessTime.Sub(answerTime).Hours() / 24
+	daysDiff := guessTime.Sub(answerTime).Hours() / 24
 
 	switch {
-	case guessTimeDiff == 0:
+	case daysDiff == 0:
 		res.Result.ReleaseDate.Value = "status_equal"
-	case guessTimeDiff > 365:
+	case daysDiff > 365:
 		res.Result.ReleaseDate.Value = "status_large_late"
-	case guessTimeDiff < -365:
+	case daysDiff < -365:
 		res.Result.ReleaseDate.Value = "status_large_early"
-	case guessTimeDiff > 0:
+	case daysDiff > 0:
 		res.Result.ReleaseDate.Value = "status_early"
-	case guessTimeDiff < 0:
+	case daysDiff < 0:
 		res.Result.ReleaseDate.Value = "status_late"
-	default:
-		return nil, gerror.NewCode(gcode.CodeInvalidParameter, "invalid guess time diff")
 	}
 
+	// 平台和标签对比
 	for platform := range guess.Platforms {
-		tmp := iostruct.GuessResult{
-			Value: platform,
-		}
+		status := "status_missing"
 		if answer.Platforms[platform] {
-			tmp.Status = "status_equal"
-		} else {
-			tmp.Status = "status_missing"
+			status = "status_equal"
 		}
-		res.Result.Platforms = append(res.Result.Platforms, tmp)
+		res.Result.Platforms = append(res.Result.Platforms, iostruct.GuessResult{
+			Value:  platform,
+			Status: status,
+		})
 	}
 
 	for tag := range guess.Tags {
-		tmp := iostruct.GuessResult{
-			Value: tag,
-		}
+		status := "status_missing"
 		if answer.Tags[tag] {
-			tmp.Status = "status_equal"
-		} else {
-			tmp.Status = "status_missing"
+			status = "status_equal"
 		}
-		res.Result.Tags = append(res.Result.Tags, tmp)
+		res.Result.Tags = append(res.Result.Tags, iostruct.GuessResult{
+			Value:  tag,
+			Status: status,
+		})
 	}
 
+	// =============================
+	//  返回结果
+	// =============================
 	return res, nil
 }

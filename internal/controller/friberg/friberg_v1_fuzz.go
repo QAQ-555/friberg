@@ -38,7 +38,7 @@ func (c *ControllerV1) Fuzz(ctx context.Context, req *v1.FuzzReq) (res *v1.FuzzR
 		limitStage,
 		projectStage,
 	}
-	cursor, err := imongo.TableSubject.Collection(ctx).Aggregate(ctx, pipeline)
+	cursor, err := imongo.TableSubject().Coll().Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, err
 	}

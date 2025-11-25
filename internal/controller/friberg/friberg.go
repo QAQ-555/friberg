@@ -7,6 +7,7 @@ package friberg
 import (
 	"fmt"
 
+	"github.com/gogf/gf/v2/util/gconv"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -16,6 +17,7 @@ type subjectinfo struct {
 	ReleaseDate string          `json:"release_date" bson:"released"`
 	Platforms   map[string]bool `json:"platform" bson:"platform_names"`
 	Tags        map[string]bool `json:"tag" bson:"tag_names"`
+	Frequency   int             ` bson:"frequency"`
 }
 
 var ProjectStage = bson.D{
@@ -85,6 +87,10 @@ func parseSubjectInfoFromRedis(data interface{}) (*subjectinfo, error) {
 		for k := range tags {
 			sub.Tags[k] = true
 		}
+	}
+	// 5. 解析 Frequency int
+	if freq, ok := m["frequency"].(string); ok {
+		sub.Frequency = gconv.Int(freq)
 	}
 
 	return sub, nil

@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"friberg/internal/consts"
-	"friberg/utility/event.go"
+	"friberg/utility/event"
 
 	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/os/gproc"

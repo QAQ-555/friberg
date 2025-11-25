@@ -13,6 +13,7 @@ import (
 
 type IFribergGame interface {
 	StartBase(ctx context.Context, req *game.StartBaseReq) (res *game.StartBaseRes, err error)
+	StartMulti(ctx context.Context, req *game.StartMultiReq) (res *game.StartMultiRes, err error)
 }
 
 type IFribergV1 interface {

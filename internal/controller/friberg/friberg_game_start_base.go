@@ -23,7 +23,7 @@ func (c *ControllerGame) StartBase(ctx context.Context, req *game.StartBaseReq) 
 		projectStage,
 	}
 
-	cursor, err := imongo.TableSubject.Collection(ctx).Aggregate(ctx, pipeline)
+	cursor, err := imongo.TableSubject().Coll().Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +38,7 @@ func (c *ControllerGame) StartBase(ctx context.Context, req *game.StartBaseReq) 
 	} else {
 		return nil, gerror.New("no document found")
 	}
-
+	result.Frequency = 10
 	// 存入 session/Redis
 	r.Session.Set("subject", result)
 	return &game.StartBaseRes{}, nil

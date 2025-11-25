@@ -40,7 +40,7 @@ func (c *ControllerV1) FribergHello(ctx context.Context, req *v1.FribergHelloReq
 		limitStage,
 		projectStage,
 	}
-	cursor, err := imongo.TableSubject.Collection(ctx).Aggregate(ctx, pipeline)
+	cursor, err := imongo.TableSubject().Coll().Aggregate(ctx, pipeline)
 	if err != nil {
 		log.Fatalf("failed to aggregate: %v", err)
 	}
