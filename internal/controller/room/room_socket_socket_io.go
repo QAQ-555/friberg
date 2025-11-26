@@ -2,6 +2,7 @@ package room
 
 import (
 	"context"
+	"fmt"
 
 	"friberg/api/room/socket"
 	"friberg/internal/consts"
@@ -17,9 +18,13 @@ import (
 func (c *ControllerSocket) SocketIo(ctx context.Context, req *socket.SocketIoReq) (res *socket.SocketIoRes, err error) {
 	r := ghttp.RequestFromCtx(ctx)
 	ch := make(chan *websocket.Conn, 1)
-	client := player.NewWsClient(nil, ctx, req.UserName)
+	var (
+		address = r.RemoteAddr
+		header  = fmt.Sprintf("%v", r.Header)
+	)
+	client := player.NewWsClient(nil, ctx, req.UserName, address, header)
 	go isocket.HandleWsRequest(r, ch, func() {
-		manager.PM.Remove(client.Uuid)
+		manager.RemovePlayerBusiness(client.Uuid)
 	})
 	ws := <-ch // 等待连接初始化完成
 	if ws == nil {

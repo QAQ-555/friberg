@@ -25,10 +25,14 @@ type OutClient struct {
 	UserName []string `json:"userNames"` // 用户名
 }
 
-func NewWsClient(ws *websocket.Conn, ctx context.Context, userName string) *WsClient {
+func NewWsClient(ws *websocket.Conn, ctx context.Context, userName string, args ...string) *WsClient {
 	Newctx, cancel := context.WithCancel(gctx.New())
+	argsStr := ""
+	for _, arg := range args {
+		argsStr += arg
+	}
 	return &WsClient{
-		Uuid:     guid.S(),
+		Uuid:     guid.S([]byte(argsStr)),
 		Ws:       ws,
 		HttpCtx:  ctx,
 		Ctx:      Newctx,

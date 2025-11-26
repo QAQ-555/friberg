@@ -8,7 +8,7 @@ import (
 )
 
 func (c *ControllerRoom) RoomExit(ctx context.Context, req *room.RoomExitReq) (res *room.RoomExitRes, err error) {
-	err = manager.RM.RemovePlayer(req.RoomId, req.Uuid)
+	err = manager.PlayerExitRoom(req.Uuid)
 	if err != nil {
 		return nil, err
 	}

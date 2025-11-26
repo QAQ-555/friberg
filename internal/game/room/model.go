@@ -22,9 +22,13 @@ type OutRoom struct {
 	NumPlayer int    `json:"num_player"`
 }
 
-func NewRoom(uuid string) *Room {
+func NewRoom(uuid string, args ...string) *Room {
+	str := ""
+	for _, arg := range args {
+		str += arg
+	}
 	return &Room{
-		Roomid:     guid.S(),
+		Roomid:     guid.S([]byte(str)),
 		Owner:      uuid,
 		PlayerList: make([]*player.WsClient, 0),
 	}

@@ -2,10 +2,7 @@ package manager
 
 import (
 	"context"
-	"friberg/internal/consts"
-	"friberg/internal/game/player"
 	"friberg/internal/game/room"
-	isocket "friberg/internal/library/websocket"
 	"sync"
 
 	"github.com/gogf/gf/v2/errors/gcode"
@@ -22,165 +19,95 @@ var RM = &RoomManager{
 	rooms: make(map[string]*room.Room),
 }
 
-// 创建房间
-func (rm *RoomManager) CreateRoom(room *room.Room) error {
-	g.Log().Infof(context.TODO(), "palyer %s Create room:%s", room.Owner, room.Roomid)
+// ----------------- 基础接口 -----------------
+func (rm *RoomManager) AddRoom(r *room.Room) {
 	rm.mu.Lock()
-	PM.mu.RLock()
 	defer rm.mu.Unlock()
-	defer PM.mu.RUnlock()
-	// 检查创建者是否已在其他房间
-	if _, ok := IRPM.inRoomPlayers[room.Owner]; ok {
-		return gerror.NewCode(gcode.CodeInvalidParameter, "player already in room")
-	}
-	//添加房间对象
-	rm.rooms[room.Roomid] = room
-	//广播房间列表
-	rm.BroadcastRoomList()
-	return nil
+	rm.rooms[r.Roomid] = r
 }
 
-// 删除房间
-func (rm *RoomManager) DeleteRoom(roomID string) error {
-	g.Log().Infof(context.TODO(), "Delete room:%s", roomID)
+func (rm *RoomManager) RemoveRoom(roomID string) {
 	rm.mu.Lock()
-	PM.mu.Lock()
-	defer PM.mu.Unlock()
 	defer rm.mu.Unlock()
-	//检查房间是否存在
-	if _, ok := rm.rooms[roomID]; !ok {
-		return gerror.NewCode(gcode.CodeInvalidParameter, "room not exist")
-	}
-	for _, p := range rm.rooms[roomID].PlayerList {
-		//更新玩家房间ID
-		PM.players[p.Uuid].RoomId = ""
-		delete(IRPM.inRoomPlayers, p.Uuid)
-		msg := isocket.Message{
-			MsgType: consts.MsgType_RoomExit,
-			Data:    nil,
-		}
-		p.Ws.WriteJSON(msg)
-	}
 	delete(rm.rooms, roomID)
-	//广播房间列表
-	rm.BroadcastRoomList()
+}
+
+func (rm *RoomManager) GetRoom(roomID string) (*room.Room, bool) {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	r, ok := rm.rooms[roomID]
+	return r, ok
+}
+
+func (rm *RoomManager) IsRoomExist(roomID string) bool {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	_, ok := rm.rooms[roomID]
+	return ok
+}
+func (rm *RoomManager) SetNewOwner(roomID, uuid string) bool {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	r, ok := rm.rooms[roomID]
+	if !ok {
+		return false
+	}
+	r.Owner = uuid
+	return true
+}
+func (rm *RoomManager) GetPlayerList(roomID string) []string {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	r, ok := rm.rooms[roomID]
+	if !ok {
+		return nil
+	}
+	var playerList []string
+	for _, p := range r.PlayerList {
+		playerList = append(playerList, p.Uuid)
+	}
+	return playerList
+}
+
+func (rm *RoomManager) AddPlayerToRoom(roomID string, uuid string) error {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	r, ok := rm.rooms[roomID]
+	if !ok {
+		return gerror.NewCode(gcode.CodeInvalidParameter, "room not exist")
+	}
+
+	pl := PM.get(uuid)
+	if pl == nil {
+		return gerror.NewCode(gcode.CodeInvalidParameter, "player not exist")
+	}
+	r.PlayerList = append(r.PlayerList, pl)
 	return nil
 }
 
-// 添加玩家到房间
-func (rm *RoomManager) AddPlayer(roomID, uuid string) error {
-	g.Log().Infof(context.TODO(), "Add player %s to room %s", uuid, roomID)
+func (rm *RoomManager) RemovePlayerFromRoom(roomID, uuid string) error {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
-	//检查房间是否存在
-	if _, ok := rm.rooms[roomID]; !ok {
+	r, ok := rm.rooms[roomID]
+	if !ok {
 		return gerror.NewCode(gcode.CodeInvalidParameter, "room not exist")
 	}
-	//检查玩家是否已在其他房间
-	if _, ok := IRPM.inRoomPlayers[uuid]; ok {
-		return gerror.NewCode(gcode.CodeInvalidParameter, "player already in room")
-	}
-	//添加玩家到在房间内玩家列表
-	IRPM.inRoomPlayers[uuid] = PM.players[uuid]
-	//添加玩家到房间内玩家列表
-	r := rm.rooms[roomID]
-	r.PlayerList = append(r.PlayerList, PM.players[uuid])
-	//广播房间内玩家列表
-	rm.BroadcastPlayer(r)
-	//更新玩家房间ID
-	PM.players[uuid].RoomId = roomID
-	return nil
-}
-
-// 从房间移除玩家
-func (rm *RoomManager) RemovePlayer(roomID, uuid string) error {
-	g.Log().Infof(context.TODO(), "Remove player %s from room %s", uuid, roomID)
-	rm.mu.Lock()
-	defer rm.mu.Unlock()
-	//检查房间是否存在
-	if _, ok := rm.rooms[roomID]; !ok {
-		return gerror.NewCode(gcode.CodeInvalidParameter, "room not exist")
-	}
-	r := rm.rooms[roomID]
-	//检查将玩家从房间内玩家列表移除
 	for i, p := range r.PlayerList {
 		if p.Uuid == uuid {
 			r.PlayerList = append(r.PlayerList[:i], r.PlayerList[i+1:]...)
 			break
 		}
 	}
-	if len(r.PlayerList) == 0 {
-		rm.DeleteRoom(roomID)
-		return nil
-	} else {
-		r.Owner = r.PlayerList[0].Uuid
-		PM.players[r.Owner].RoomId = roomID
-	}
-	//广播房间内玩家列表
-	rm.BroadcastPlayer(r)
-	//更新玩家房间ID
-	PM.players[uuid].RoomId = ""
-	delete(IRPM.inRoomPlayers, uuid)
 	return nil
 }
 
-// BroadcastRoom 向所有在线玩家广播房间列表信息
-// 该函数会遍历所有在线玩家，并将当前的房间列表数据发送给他们
-// 使用互斥锁确保线程安全，防止并发访问rooms数据
-func (rm *RoomManager) BroadcastRoomList() {
-	roomList := room.OutRoomlist{}
-	for _, r := range rm.rooms {
-		owner := PM.players[r.Owner]
-		g.Log().Info(context.TODO(), r)
-		outRoom := room.OutRoom{
-			Roomid:    r.Roomid,
-			Owner:     owner.UserName,
-			NumPlayer: len(r.PlayerList),
-		}
-		roomList.RoomList = append(roomList.RoomList, outRoom)
-	}
-	for _, c := range PM.players {
-		c.Ws.WriteJSON(isocket.Message{
-			MsgType: consts.MsgType_RoomList,
-			Data:    roomList,
-		})
-	}
-}
-
-// BroadcastPlayer 向房间内所有玩家广播玩家列表信息
-// 该函数会遍历房间内所有玩家，并将当前的玩家列表数据发送给他们
-// 使用互斥锁确保线程安全，防止并发访问PlayerList数据
-func (rm *RoomManager) BroadcastPlayer(r *room.Room) {
-	if len(r.PlayerList) == 0 {
-		return
-	}
-
-	// 构建 UUID 列表
-	userNames := make([]string, 0, len(r.PlayerList))
-	for _, c := range r.PlayerList {
-		userNames = append(userNames, c.UserName)
-	}
-
-	msg := isocket.Message{
-		MsgType: consts.MsgType_RoomPlayerList,
-		Data: player.OutClient{
-			UserName: userNames,
-		},
-	}
-
-	// 发送消息
-	for _, c := range r.PlayerList {
-		err := c.Ws.WriteJSON(msg)
-		if err != nil {
-			g.Log().Error(c.Ctx, "write json error", err)
-			c.Cancel()
-		}
-	}
-}
-
 func (rm *RoomManager) ShowList() {
-	rm.mu.Lock()
-	defer rm.mu.Unlock()
+	rm.mu.RLock()
+	PM.mu.RLock()
+	IRPM.mu.RLock()
+	defer PM.mu.RUnlock()
+	defer IRPM.mu.RUnlock()
+	defer rm.mu.RUnlock()
 	g.Log().Info(context.TODO(), "room list:")
 	for _, r := range rm.rooms {
 		g.Log().Info(context.TODO(), "[room]", r.Roomid, r.Owner, len(r.PlayerList))
