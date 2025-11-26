@@ -21,7 +21,7 @@ var (
 	}
 )
 
-func HandleWsRequest(r *ghttp.Request, ch chan *websocket.Conn) {
+func HandleWsRequest(r *ghttp.Request, ch chan *websocket.Conn, onClose func()) {
 	ctx := r.Context()
 	ws, err := wsUpGrader.Upgrade(r.Response.Writer, r.Request, nil)
 	if err != nil {
@@ -29,7 +29,7 @@ func HandleWsRequest(r *ghttp.Request, ch chan *websocket.Conn) {
 		r.Response.Write(err.Error())
 		return
 	}
-	defer HandleWsDisconnect(ctx, ws)
+	defer HandleWsDisconnect(ctx, ws, onClose)
 
 	ch <- ws
 	g.Log().Info(ctx, "HandleWsRequest success")
@@ -42,8 +42,11 @@ func HandleWsRequest(r *ghttp.Request, ch chan *websocket.Conn) {
 	}
 }
 
-func HandleWsDisconnect(ctx context.Context, ws *websocket.Conn) error {
+func HandleWsDisconnect(ctx context.Context, ws *websocket.Conn, onClose func()) error {
 	//TODO: 处理断开连接
+	if onClose != nil {
+		onClose()
+	}
 	return ws.Close()
 }
 

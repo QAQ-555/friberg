@@ -1,8 +1,6 @@
 package main
 
 import (
-	_ "friberg/internal/packed"
-
 	"github.com/gogf/gf/v2/os/gctx"
 
 	"friberg/internal/cmd"

@@ -17,12 +17,15 @@ import (
 func (c *ControllerSocket) SocketIo(ctx context.Context, req *socket.SocketIoReq) (res *socket.SocketIoRes, err error) {
 	r := ghttp.RequestFromCtx(ctx)
 	ch := make(chan *websocket.Conn, 1)
-	go isocket.HandleWsRequest(r, ch)
+	client := player.NewWsClient(nil, ctx, req.UserName)
+	go isocket.HandleWsRequest(r, ch, func() {
+		manager.PM.Remove(client.Uuid)
+	})
 	ws := <-ch // 等待连接初始化完成
 	if ws == nil {
 		return nil, gerror.New("websocket upgrade failed")
 	}
-	client := player.NewWsClient(ws, ctx, req.UserName)
+	client.Ws = ws
 	manager.PM.Add(client)
 	msg := isocket.Message{
 		MsgType: consts.MsgType_Init,

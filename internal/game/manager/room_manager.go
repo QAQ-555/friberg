@@ -14,7 +14,7 @@ import (
 )
 
 type RoomManager struct {
-	mu    sync.Mutex
+	mu    sync.RWMutex
 	rooms map[string]*room.Room
 }
 
@@ -24,10 +24,13 @@ var RM = &RoomManager{
 
 // 创建房间
 func (rm *RoomManager) CreateRoom(room *room.Room) error {
+	g.Log().Infof(context.TODO(), "palyer %s Create room:%s", room.Owner, room.Roomid)
 	rm.mu.Lock()
+	PM.mu.RLock()
 	defer rm.mu.Unlock()
+	defer PM.mu.RUnlock()
 	// 检查创建者是否已在其他房间
-	if _, ok := PM.inRoomPlayers[room.Owner]; ok {
+	if _, ok := IRPM.inRoomPlayers[room.Owner]; ok {
 		return gerror.NewCode(gcode.CodeInvalidParameter, "player already in room")
 	}
 	//添加房间对象
@@ -39,7 +42,10 @@ func (rm *RoomManager) CreateRoom(room *room.Room) error {
 
 // 删除房间
 func (rm *RoomManager) DeleteRoom(roomID string) error {
+	g.Log().Infof(context.TODO(), "Delete room:%s", roomID)
 	rm.mu.Lock()
+	PM.mu.Lock()
+	defer PM.mu.Unlock()
 	defer rm.mu.Unlock()
 	//检查房间是否存在
 	if _, ok := rm.rooms[roomID]; !ok {
@@ -48,7 +54,7 @@ func (rm *RoomManager) DeleteRoom(roomID string) error {
 	for _, p := range rm.rooms[roomID].PlayerList {
 		//更新玩家房间ID
 		PM.players[p.Uuid].RoomId = ""
-		delete(PM.inRoomPlayers, p.Uuid)
+		delete(IRPM.inRoomPlayers, p.Uuid)
 		msg := isocket.Message{
 			MsgType: consts.MsgType_RoomExit,
 			Data:    nil,
@@ -63,6 +69,7 @@ func (rm *RoomManager) DeleteRoom(roomID string) error {
 
 // 添加玩家到房间
 func (rm *RoomManager) AddPlayer(roomID, uuid string) error {
+	g.Log().Infof(context.TODO(), "Add player %s to room %s", uuid, roomID)
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 	//检查房间是否存在
@@ -70,11 +77,11 @@ func (rm *RoomManager) AddPlayer(roomID, uuid string) error {
 		return gerror.NewCode(gcode.CodeInvalidParameter, "room not exist")
 	}
 	//检查玩家是否已在其他房间
-	if _, ok := PM.inRoomPlayers[uuid]; ok {
+	if _, ok := IRPM.inRoomPlayers[uuid]; ok {
 		return gerror.NewCode(gcode.CodeInvalidParameter, "player already in room")
 	}
 	//添加玩家到在房间内玩家列表
-	PM.inRoomPlayers[uuid] = PM.players[uuid]
+	IRPM.inRoomPlayers[uuid] = PM.players[uuid]
 	//添加玩家到房间内玩家列表
 	r := rm.rooms[roomID]
 	r.PlayerList = append(r.PlayerList, PM.players[uuid])
@@ -87,6 +94,7 @@ func (rm *RoomManager) AddPlayer(roomID, uuid string) error {
 
 // 从房间移除玩家
 func (rm *RoomManager) RemovePlayer(roomID, uuid string) error {
+	g.Log().Infof(context.TODO(), "Remove player %s from room %s", uuid, roomID)
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 	//检查房间是否存在
@@ -101,11 +109,18 @@ func (rm *RoomManager) RemovePlayer(roomID, uuid string) error {
 			break
 		}
 	}
+	if len(r.PlayerList) == 0 {
+		rm.DeleteRoom(roomID)
+		return nil
+	} else {
+		r.Owner = r.PlayerList[0].Uuid
+		PM.players[r.Owner].RoomId = roomID
+	}
 	//广播房间内玩家列表
 	rm.BroadcastPlayer(r)
 	//更新玩家房间ID
 	PM.players[uuid].RoomId = ""
-	delete(PM.inRoomPlayers, uuid)
+	delete(IRPM.inRoomPlayers, uuid)
 	return nil
 }
 
@@ -132,6 +147,9 @@ func (rm *RoomManager) BroadcastRoomList() {
 	}
 }
 
+// BroadcastPlayer 向房间内所有玩家广播玩家列表信息
+// 该函数会遍历房间内所有玩家，并将当前的玩家列表数据发送给他们
+// 使用互斥锁确保线程安全，防止并发访问PlayerList数据
 func (rm *RoomManager) BroadcastPlayer(r *room.Room) {
 	if len(r.PlayerList) == 0 {
 		return
@@ -157,5 +175,22 @@ func (rm *RoomManager) BroadcastPlayer(r *room.Room) {
 			g.Log().Error(c.Ctx, "write json error", err)
 			c.Cancel()
 		}
+	}
+}
+
+func (rm *RoomManager) ShowList() {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	g.Log().Info(context.TODO(), "room list:")
+	for _, r := range rm.rooms {
+		g.Log().Info(context.TODO(), "[room]", r.Roomid, r.Owner, len(r.PlayerList))
+	}
+	g.Log().Info(context.TODO(), "inRoomPlayers:")
+	for _, p := range IRPM.inRoomPlayers {
+		g.Log().Info(context.TODO(), "[inRoomPlayers]", p.UserName, p.RoomId, p.Uuid)
+	}
+	g.Log().Info(context.TODO(), "players:")
+	for _, p := range PM.players {
+		g.Log().Info(context.TODO(), "[players]", p.UserName, p.RoomId, p.Uuid)
 	}
 }
